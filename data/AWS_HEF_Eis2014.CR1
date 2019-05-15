@@ -1,0 +1,169 @@
+'CR1000 Series Datalogger
+'Program for AWS Hintereisferner Zunge 
+' template taken from AWS Zufall update
+'date: 01.07.2014
+'program author: Rainer Prinz
+
+
+'Declare Public Variables
+Public Batt  'battery voltage
+Public Tair  'air temperature Vaisala HMP45c
+Public RH  'humidity Vaisala HMP45c
+Public Wspeed  'wind speed Young 05103
+Public Wdir  'wind direction Young 05103
+Public SR50(2)  	'sonic ranger SR50A
+Alias SR50(1)=Dist 	'raw distance from sonic ranger
+Alias SR50(2)=SRQC 	'quality value for sonic ranger
+Public RH100 		'relative humidity capped at 100%
+Public e_sat_w		'saturated vapour pressure over water
+Public e_sat_i		'saturated vapour pressure over ice
+Public e 		'computed vapour pressure
+Public SWI  'short-wave incoming radiation 
+Public SWO  'short-wave outgoing radiation 
+Public LWI  'long-wave incoming radiation without temperature correction
+Public LWO  'long-wave outgoing radiation without temperature correction
+Public cnr4_T_C   'CNR4 thermistor temperature in Celcius
+Public LWI_corr   'long-wave incoming radiation with temperature correction
+Public LWO_corr   'long-wave outgoing radiation with temperature correction
+Public Press  'air pressure Vaisala PTB110
+Dim Rs, Vs_Vx  'for CNR4 Thermistor
+
+Units Batt=Volt
+Units Tair=Celsius
+Units RH=% 
+Units Wspeed=m/s
+Units Wdir=degree
+Units Dist=m 
+Units SRQC=none
+Units RH100=%
+Units e_sat_w=hPa
+Units e_sat_i=hPa
+Units e=hPa
+Units SWI = W/m^2
+Units SWO = W/m^2
+Units LWI = W/m^2
+Units LWO = W/m^2
+Units cnr4_T_C = Celsius
+Units LWI_corr = W/m^2
+Units LWO_corr = W/m^2
+Units Press = hPa
+
+'Declare Constants  'sensitivity = 14.57 mikroV/W/m2 = 1000/14.57 W/m2/milliV
+Const up_pyr=1000/14.55   'upper Pyranometer
+Const low_pyr=1000/11.91  'lower Pyranometer
+Const up_pyg=1000/7.43   'upper Pyrgeometer
+Const low_pyg=1000/7.73  'lower Pyrgeometer
+
+
+'Define Data Tables
+DataTable(HEF_Eis,1,-1)
+  DataInterval(0,30,Min,10)
+  CardOut (0,-1)
+  Minimum(1,Batt,FP2,0,0)
+  Average(1,Tair,FP2,False)
+  Maximum (1,Tair,FP2,False,True)
+  Minimum (1,Tair,FP2,False,True)
+  Average(1,RH,IEEE4,False) 
+  Average(1,RH100,IEEE4,False) 'same as RH, but capped at 100%
+  Average(1,e,IEEE4,False)
+  WindVector(1,Wspeed,Wdir,FP2,False,0,0,0)
+  FieldNames("Wspeed,Wdir,Std_Wdir")
+  Average(1,Dist,FP2,False)
+  Maximum(1,SRQC,FP2,0,0)
+  Average(1,SWI,IEEE4,True)
+  Average(1,SWO,IEEE4,True)
+  Average(1,LWI,IEEE4,True)
+  Average(1,LWO,IEEE4,True)
+  Average(1,cnr4_T_C,IEEE4,True)
+  Average(1,LWI_corr,IEEE4,False)
+  Average(1,LWO_corr,IEEE4,False)
+  Sample(1,Press,IEEE4)
+EndTable
+
+
+
+'Main Program
+
+BeginProg
+  Scan (1,Min,1,0)
+	
+	'Battery Voltage
+	Battery (Batt)  
+	
+	'Vaisala HMP45AC Temperature and Humidity probe; SeNr.: A4810095; calibration date: 30Apr2013
+	SW12(1)  'set SW12 high (on)
+	  Delay (0,200,mSec)
+	  VoltDiff (Tair,1,mV2500,6,True ,0,_60Hz,0.1,-40) 'air temperature
+	  VoltDiff (RH,1,mV2500,7,True ,0,_60Hz,0.1,0) 'relative humidity
+	SW12 (0)  'set SW12 port low
+
+	'Compute saturated e over water and ice
+	SatVP(e_sat_w, Tair)
+	e_sat_i=-.00486 + (.85471*e_sat_w) + (.2441*(e_sat_w^2))
+	e_sat_w=e_sat_w*10  'translate to hPa
+	e_sat_i=e_sat_i*10  'translate to hPa
+
+	'Cap relative humidity at 100%
+	If RH>100 AND RH<108 Then 
+       		RH100=100 
+	Else 
+       		RH100=RH
+	EndIf
+
+	'Compute e from e_sat and Tair
+	If Tair>0 Then
+		e=e_sat_w*(RH100/100)
+	Else
+		e=e_sat_i*(RH100/100)
+	EndIf
+
+    
+  '05103 Wind Speed & Direction Sensor measurements Wspeed and Wdir; SeNr.: 25498
+  PulseCount(Wspeed,1,1,1,1,0.098,0)
+  BrHalf(Wdir,1,mV2500,7,Vx2,1,2500,True,0,_60Hz,355,0) 
+  If Wdir>=360 Then Wdir=0
+  If Wdir<0 Then Wdir=0
+  
+  'SR50A Sonic Ranging Sensor; SeNr.: 4296; Maintained membrane??
+  'Read the Distance from the SR50A "M1!" command returns the distance and quality
+  SDI12Recorder (SR50(),1,0,"M1!",1.0,0)
+  
+  'CNR4 Net Radiometer measurements SWI, SWO, LWI, LWO, CNR4TC, LWI_corr, and LWO_corr; SeNr.: 100151; Calibrated: 
+  VoltDiff(SWI,1,mV25,1,True,0,_60Hz,up_pyr,0) 'upper pyranometer 
+  VoltDiff(SWO,1,mV25,2,True,0,_60Hz,low_pyr,0) 'lower pyranometer 
+  VoltDiff(LWI,1,mV25,3,True,0,_60Hz,up_pyg,0) 'upper pyrgeometer 
+  VoltDiff(LWO,1,mV25,5,True,0,_60Hz,low_pyg,0) 'lower pyrgeometer 
+    	
+  'CNR4 thermistor temperature
+  BrHalf (Vs_Vx,1,mv2500,8,Vx1,1,2500,True ,0,250,1,0)
+  Rs = 1000*(Vs_Vx/(1-Vs_Vx))
+  cnr4_T_C = 1/(1.0295e-3+2.391e-4*LN(Rs)+1.568e-7*(LN(Rs))^3)-273.15 'manaul Campbell
+  
+  'Correct the long-wave radiation values from pyrgeometers
+  LWI_corr = LWI+5.67e-8*(cnr4_T_C+273.15)^4
+  LWO_corr = LWO+5.67e-8*(cnr4_T_C+273.15)^4
+   
+  'Vaisala PTB110 Barometric Pressure Sensor; SeNr.: F1610096
+  If IfTime(29,30,Min) Then PortSet(2,1)
+  If IfTime(0,30,Min) Then
+     VoltSe(Press,1,mV2500,15,1,0,_60Hz,0.240,500)
+     PortSet(2,0)
+  EndIf
+
+  CallTable HEF_Eis
+	NextScan
+EndProg
+
+
+'Channels used:
+'Diff 1-3 + 5 CNR4
+'Diff 6-7 HMP45c
+'SE 8 CNR4 thermistor
+'SE 7 Young 05103
+'SE 15 PTB110
+'VX1 CNR4 thermistor
+'VX2 Young 05103
+'SW12 Vaisala HMP45c
+'P1 Young 05103
+'C1 SR50a
+'C2 PTB110
