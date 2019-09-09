@@ -1,0 +1,13 @@
+name: notebooks
+dependencies:
+  - python
+  - pandas
+  - jupyter
+  - nodejs
+  - ipywidgets
+  - numpy==1.14.3
+  - statsmodels
+  - collections
+  - glob
+  - plotly
+  - datetime
